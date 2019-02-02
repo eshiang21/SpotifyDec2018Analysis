@@ -1,0 +1,216 @@
+---
+title: "TT1 Spotify 12 2018"
+author: "Edward Shiang"
+date: "1/30/2019"
+output: html_document
+---
+
+##Part 1: Webscraping Spotify's Daily Top 200 Chart Info For December
+Note: several webscraping code portions borrowed courtesy of Jake Daniels 
+```{r}
+library(rvest)
+library(tidyverse)
+library(knitr)
+library(lubridate)
+
+url <- "https://spotifycharts.com/regional/us/daily/"
+timevalues <- 
+  seq(as.Date("2018/12/01"), as.Date("2018/12/31"), by = "day")
+
+combineURLPieces<- function(x){
+ full_url <- paste0(url, x)
+ full_url
+}
+
+finalurl <- data.frame(url = combineURLPieces(timevalues), 
+                       date = timevalues, stringsAsFactors = FALSE)
+
+SpotifyScrape <- function(x, day)
+{
+ page <- x
+ rank <- as.data.frame(1:200)
+ track <- page %>% read_html() %>% html_nodes('strong') %>% html_text() %>% as.data.frame(., stringsAsFactors = FALSE)
+ 
+ artist <- page %>% read_html() %>% html_nodes('span') %>% html_text() %>% as.data.frame(., stringsAsFactors = FALSE)
+ artist <- as.data.frame(artist[-1,], stringsAsFactors = FALSE)
+ artist <- sapply(as.vector(artist), function(x) substring(x, 4)) %>% as.data.frame(., stringsAsFactors = FALSE)
+ 
+ streams <- page %>% read_html() %>% html_nodes('.chart-table-streams') %>% html_text() %>% as.data.frame(., stringsAsFactors = FALSE)
+ streams <- as.data.frame(streams[-1,])
+ streams <- sapply(streams, function(x) as.numeric(gsub(pattern = ",", replacement = "",x))) %>% as.data.frame(.,stringsAsFactors = FALSE) 
+
+#combine, define columns names, and make it a tibble
+ chart <- cbind(rank, track, artist, streams, day)
+ names(chart) <- c("Rank", "Track", "Artist", "Streams", "Day")
+ chart <- as_tibble(chart)
+ 
+ chart$Rank <- chart$Rank %>% as.numeric()
+ 
+ return(chart)
+}
+
+
+```
+
+
+```{r}
+scrapeSpotifyByMonth31 <- function() 
+{
+
+  decData <- as.list(rep(NA, 31))
+  for(i in 1:31)
+  {
+    decData[[i]] <- 
+      SpotifyScrape(finalurl[i,1],finalurl[i,2])
+    
+  }
+  return(decData)
+}
+
+finalDecList <- scrapeSpotifyByMonth31()
+
+```
+
+#Just to check we've got the right number of elements for the grand total of the combined "day" lists within the grand "Dec" list
+```{r}
+library(assertthat)
+
+count <- 0
+for(i in 1:length(finalDecList))
+{
+  count <- count + nrow(finalDecList[[i]])
+}
+count
+
+assert_that(count == 31*200)
+
+```
+
+##Part 2.1: Top 200 Grand Streaming Totals Per Day
+```{r}
+library(extrafont)
+library(ggplot2)
+streamsByDay <- data.frame(1:31,rep(NA, 31))
+names(streamsByDay) <- c("Day","Total")
+
+for(i in 1:length(finalDecList))
+{
+  streamsByDay[i,2] <- sum(finalDecList[[i]]$Streams)
+}
+streamsByDayReal <- streamsByDay
+streamsByDay["Total"] <- streamsByDay["Total"] / 1000000
+ggplot(streamsByDay, aes(x = factor(Day), y = Total, color = Total)) + geom_point() + scale_color_gradient(high="lightyellow1", low="skyblue", name = "Color gradient in millions") + theme_dark() + labs(x = "Day of December", y = "Streaming Totals of Top 200 Songs", title = "December Streaming Totals of the Top 200 Songs By Day", subtitle = "Note: streaming total values per day are in terms of millions of users") + theme(text = element_text(size = 12, family = "Avenir Next"), axis.text = element_text(size = 6), plot.subtitle= element_text(size=5,colour="grey40"))
+
+```
+
+
+#Part 2.2: Days of the Week With High Top 200 Streaming Totals
+```{r}
+#December 1, 6, 7, 14, 15, 20, 21
+weekdays(finalurl[c(1, 7, 8, 14, 15, 21, 22),]$date) %>% table
+weekdays(finalurl[c(2, 9, 16, 30),]$date) %>% table
+
+
+```
+
+
+
+
+
+
+##Part 3: XXXTENTACION
+```{r, warning = FALSE}
+
+finalDecList[[6]][,c(3:4)] %>% group_by(Artist) %>% summarise(sum(Streams)) %>% arrange(desc(`sum(Streams)`)) %>% head(10L) %>% kable 
+finalDecList[[7]][,c(3:4)] %>% group_by(Artist) %>% summarise(sum(Streams)) %>% arrange(desc(`sum(Streams)`)) %>% head(10L) %>% kable 
+
+finalDecList[[6]][,c(2:4)] %>% head %>% kable
+finalDecList[[7]][,c(2:4)] %>% head %>% kable
+
+finalDecList[[6]]$Artist %>% table %>% sort(decreasing = TRUE) %>% head
+finalDecList[[7]]$Artist %>% table %>% sort(decreasing = TRUE) %>% head
+
+xxxStreams <- data.frame(1:31,rep(NA, 31), stringsAsFactors = FALSE)
+names(xxxStreams) <- c("Day","xxxTotal")
+
+for(i in 1:nrow(xxxStreams))
+{
+  xxxStreams[i,2] <- sum(finalDecList[[i]][finalDecList[[i]]$Artist == "XXXTENTACION",]$Streams)
+}
+
+xxxStreams <- full_join(xxxStreams, streamsByDay, by = "Day")
+
+xxxStreams$perc <- xxxStreams$xxxTotal/(xxxStreams$Total*1000000)
+
+  
+ggplot(xxxStreams[1:16,], aes(x = factor(Day), y = perc*100, fill = Total)) + geom_bar(stat = "identity") + scale_fill_gradient(high="yellow", low="black") + theme_minimal() + labs(x = "Day of December", y = "Total Percentage Streams for XXXTENTACION (%)", title = "Daily Streaming Percentages of XXXTENTACION For First Half of December", fill = "Streaming totals in millions") + theme(text = element_text(size = 10, family = "Avenir Next"), plot.title = element_text(size = 11))
+
+
+# % change
+#percentage change of streaming totals from other artists other than XXXTentacion
+100*(((104936237 - 21276485) - (89269377 - 5580998))) /(89269377 - 5580998)
+
+#total streaming increase
+#total stream # F - totalstream # TR = streaming increase
+104936237 - 89269377
+
+#% of streams increase by XXX
+#(XXX streaming F - XXX streaming TR)/ total streaming increase = 
+100*(21276485 - 5580998)/15666860
+
+
+```
+
+##Part 4.1: Number of Holiday Songs in December's Daily Top 200 
+```{r}
+library(ggthemes)
+finalDecList[[25]][1:10,] %>% kable
+Xmas <- data.frame(rep(TRUE, 200), stringsAsFactors = FALSE)
+Xmas[c(8, 20, 25, 29, 30, 32, 34, 35, 44, 48, 58, 59, 62, 66, 69, 77, 79, 80, 82, 86, 87, 92, 94, 96:99, 112, 115, 116, 123, 127, 132, 138, 140:142, 144:152,154, 157, 159, 160, 162:165, 167, 168, 170:184, 186, 191, 193, 195:199),] <- FALSE
+names(Xmas) <- c("isXmas")
+XmasSongs <- finalDecList[[25]][which(Xmas$isXmas == TRUE), ]$Track %>% as.vector()
+xmasPerDay <- data.frame(1:31, rep(NA, 31), stringsAsFactors =FALSE)
+names(xmasPerDay) <- c("Day", "numHolidaySongs")
+for(i in 1:31)
+{
+  top200 <- finalDecList[[i]]$Track %>% as.vector()
+  xmasPerDay[i,2]<- sum(XmasSongs %in% top200)
+}
+
+mean(xmasPerDay$numHolidaySongs)
+
+ggplot(xmasPerDay, aes(x = factor(Day), y = numHolidaySongs, color = numHolidaySongs)) + geom_point() + scale_color_gradient(high="tomato1", low="springgreen", name = "Color gradient in number of plays") + theme_hc() + labs(x = "Day of December", y = "Number of holiday songs in the Top 200", title = "Number of Holiday Songs In the Spotify Top 200 Per Day In December") + theme(text = element_text(size = 11, family = "Avenir Next"), axis.text.x = element_text(size = 6))
+
+#1:7, 9-19, 21-24, 26-28, 31-33, 36-43, 45-47, 49, 50
+```
+
+##Part 4.2: December Top 200 Chart Performance of the Top 10 Holiday Songs
+```{r}
+
+weekdays(finalurl[c(8, 9, 15, 16),]$date) %>% table
+
+topTenXmasSongs <-finalDecList[[25]][which(Xmas$isXmas == TRUE)[1:10],c(2,3)]
+topTenStreams <- tibble(Day = 1:26)
+for(i in 1:nrow(topTenXmasSongs))
+{
+  topTenStreams$x = rep(NA, 26)
+  names(topTenStreams)[i+1] <- as.character(topTenXmasSongs[i, 1])
+}
+
+for(i in 1:26)
+{
+  for(j in 1:10)
+  {
+    topTenStreams[i,j + 1]<- finalDecList[[i]][which(finalDecList[[i]]$Track == as.character(topTenXmasSongs[j,1]) & finalDecList[[i]]$Artist == as.character(topTenXmasSongs[j,2])), ]$Streams
+    
+    #finalDecList[[1]][which(finalDecList[[1]]$Track == as.character(topTenXmasSongs[1,1])& finalDecList[[1]]$Artist == as.character(topTenXmasSongs[1,2])), ]$Streams
+  }
+}
+
+library(reshape2)
+meltedData <- melt(topTenStreams, id = "Day")
+names(meltedData)[c(2,3)] <- c("Song","Streams")
+meltedData$Streams <- meltedData$Streams/1000
+ggplot(meltedData, aes(x = Day, y = Streams, color = Song)) + geom_line() + labs(x = "Day of December", y = "Total Streaming Counts (In Thousands of Streams)", title = "December Chart Performance of the Top 10 Most Streamed Spotify Songs", subtitle = "Note: 1 unit of streaming metric represents 1000 of streams") + theme(text = element_text(size = 10, family = "Avenir Next"), axis.text = element_text(size = 5), legend.text=element_text(size=6), plot.subtitle= element_text(size=6,colour="grey40")) + scale_x_continuous(breaks = 1:26)
+
+```
